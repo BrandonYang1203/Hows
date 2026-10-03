@@ -1,0 +1,55 @@
+name: update
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "action"
+        type: choice
+        options:
+          - 同步表單
+          - 重新解析全部
+          - 重抓全部網頁
+        default: 同步表單
+  push:
+    paths:
+      - "extract.py"
+      - "template.html"
+      - "landmarks.csv"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: build
+        env:
+          SHEET_CSV_URL: ${{ vars.SHEET_CSV_URL }}
+          FORM_URL: ${{ vars.FORM_URL }}
+          PAGE_TITLE: ${{ vars.PAGE_TITLE }}
+        run: |
+          ACTION="${{ github.event.inputs.action }}"
+          if [ "${{ github.event_name }}" = "push" ]; then ACTION="重新解析全部"; fi
+          python3 build.py "${ACTION:-同步表單}"
+      - name: save
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -A data docs
+          if git diff --cached --quiet; then
+            echo "no changes"
+          else
+            git commit -m "update"
+            git pull --rebase
+            git push
+          fi
