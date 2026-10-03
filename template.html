@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta name="referrer" content="no-referrer">
+<title>地圖</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Overpass:wght@400;600;700;800&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<style>
+:root{
+  --plate:#1F4FA0; --plate-deep:#173E80; --plate-tint:#EAF0FA;
+  --sign:#0B7A4B;
+  --ink:#24313B; --ink-2:#56636E; --ink-3:#88939B;
+  --bg:#ECEFED; --paper:#FFFFFF; --line:#D5DAD7; --line-2:#E8EBE9;
+  --lane:#F2B705; --lane-tint:#FFF6D6; --miss:#B4473A; --gone:#8A949C;
+  --font:"Overpass","Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --cjk:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%}
+a{color:var(--plate)}
+[hidden]{display:none!important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+:focus-visible{outline:3px solid var(--lane);outline-offset:2px}
+
+.bar{background:var(--paper);border-bottom:1px solid var(--line);padding:16px 22px 12px;padding-top:max(16px,env(safe-area-inset-top))}
+.brand{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+.brand h1{margin:0;font:900 20px/1 var(--cjk);letter-spacing:.12em;color:#fff;background:var(--plate);
+  padding:10px 12px 9px 15px;border-radius:5px;box-shadow:inset 0 0 0 3px var(--plate),inset 0 0 0 4.5px rgba(255,255,255,.92)}
+#summary{margin:0;color:var(--ink-2);font-size:15px}
+.add{display:grid;grid-template-columns:1fr auto;gap:8px;max-width:1100px}
+.add textarea{width:100%;resize:vertical;padding:10px 12px;border:1px solid var(--line);border-radius:6px;font:15px/1.45 var(--font);color:var(--ink);background:#FAFBFA}
+.add textarea:focus{outline:3px solid var(--lane);outline-offset:0;border-color:var(--plate);background:#fff}
+#urls{min-height:44px;height:44px}
+#paste{grid-column:1/2;min-height:64px;height:64px;transition:height .15s}
+#paste:focus,#paste.filled{height:150px}
+.add .hint{grid-column:1/-1;margin:0;font-size:13px;color:var(--ink-3)}
+.tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.btn{appearance:none;border:1px solid var(--line);background:var(--paper);color:var(--ink);padding:10px 14px;border-radius:6px;
+  font:600 14px/1.1 var(--font);cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--ink-3)}
+.btn.primary{background:var(--plate);border-color:var(--plate);color:#fff;padding:10px 22px;font-size:15px}
+.btn.primary:hover{background:var(--plate-deep)}
+.btn[disabled]{opacity:.5;cursor:progress}
+.filebtn input{display:none}
+#status{margin:10px 0 0;min-height:1.4em;font-size:14px;color:var(--ink-2)}
+#status.err{color:var(--miss)} #status.ok{color:var(--sign)}
+.viewbar{display:flex;gap:10px 16px;align-items:center;flex-wrap:wrap}
+.viewnote{margin:0;font-size:14px;color:var(--ink-2);flex:1;min-width:220px}
+a.btn{text-decoration:none}
+
+#mapWrap{position:relative;border-bottom:1px solid var(--line)}
+#map{height:clamp(380px,60vh,760px);background:#DCE1DE}
+#mapHint{position:absolute;z-index:800;left:50%;top:12px;transform:translateX(-50%);background:var(--ink);color:#fff;
+  padding:8px 14px;border-radius:6px;font-size:14px;max-width:calc(100% - 120px);text-align:center;pointer-events:none}
+.adjusting #map{cursor:crosshair}
+.adj-btn{appearance:none;border:2px solid rgba(0,0,0,.2);background:#fff;color:var(--ink);border-radius:5px;padding:7px 10px;
+  font:700 13px/1 var(--cjk);cursor:pointer;background-clip:padding-box}
+.adjusting .adj-btn{background:var(--lane);color:var(--ink)}
+
+.hicon,.licon{background:none;border:0}
+.hpin{position:relative;width:34px;height:36px}
+.hpin .pl{position:absolute;left:0;top:0;width:34px;height:26px;border-radius:4px;background:var(--plate);color:#fff;
+  display:flex;align-items:center;justify-content:center;font:800 15px/1 var(--font);font-variant-numeric:tabular-nums;
+  box-shadow:inset 0 0 0 2px var(--plate),inset 0 0 0 3px rgba(255,255,255,.92),0 1px 4px rgba(0,0,0,.35)}
+.hpin::after{content:"";position:absolute;left:12px;top:25px;border-left:5px solid transparent;border-right:5px solid transparent;border-top:9px solid var(--plate)}
+.hpin.gone .pl{background:var(--gone);box-shadow:inset 0 0 0 2px var(--gone),inset 0 0 0 3px rgba(255,255,255,.92),0 1px 4px rgba(0,0,0,.3)}
+.hpin.gone::after{border-top-color:var(--gone)}
+.hpin.unknown .pl{background:#fff;color:var(--plate);box-shadow:inset 0 0 0 2px var(--plate),0 1px 4px rgba(0,0,0,.3)}
+.hpin.sel .pl{box-shadow:inset 0 0 0 2px var(--plate),inset 0 0 0 3px #fff,0 0 0 3px var(--lane),0 2px 8px rgba(0,0,0,.45)}
+.hpin .badge{position:absolute;right:-8px;top:-9px;background:var(--lane);color:var(--ink);font:700 10px/1 var(--cjk);
+  padding:3px 4px;border-radius:9px;box-shadow:0 0 0 1.5px #fff}
+.lmdot{width:12px;height:12px;border-radius:50%;background:var(--sign);box-shadow:0 0 0 2px #fff,0 1px 3px rgba(0,0,0,.4)}
+.leaflet-tooltip.ptip{background:#fff;color:var(--plate-deep);border:1px solid rgba(31,79,160,.4);border-radius:4px;padding:1px 6px;
+  font:700 12px/1.4 var(--font);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.leaflet-tooltip.ltip{background:var(--sign);color:#fff;border:0;border-radius:4px;padding:5px 8px 4px;font:700 12px/1.2 var(--cjk);
+  letter-spacing:.04em;white-space:nowrap;box-shadow:inset 0 0 0 2px var(--sign),inset 0 0 0 3px rgba(255,255,255,.85),0 1px 3px rgba(0,0,0,.3)}
+.leaflet-tooltip.ptip::before,.leaflet-tooltip.ltip::before{display:none}
+.leaflet-container{font-family:var(--font)}
+.leaflet-popup-content-wrapper{border-radius:8px}
+.leaflet-popup-content{margin:14px 16px;font:14px/1.5 var(--font);color:var(--ink);min-width:250px}
+.pop h3{display:flex;gap:9px;align-items:flex-start;margin:0 0 8px;font:700 15px/1.35 var(--cjk)}
+.pop h3 a{color:var(--ink);text-decoration:none}
+.pop h3 a:hover{text-decoration:underline}
+.pop .pp{font:800 21px/1.1 var(--font);color:var(--plate)}
+.pop .pu{color:var(--ink-2);font-size:13px;margin-left:6px}
+.pop dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:10px 0}
+.pop dt{color:var(--ink-2)} .pop dd{margin:0}
+.pop .sec{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--line-2);font-size:13px;color:var(--ink-2)}
+.pop .links{margin-top:10px;display:flex;gap:14px;flex-wrap:wrap}
+.pop .links a{font-weight:700}
+.pop .geo{font-size:12px;color:var(--ink-3);margin-top:6px}
+.pop .mini{appearance:none;border:0;background:none;color:var(--plate);font:700 13px var(--font);padding:0;cursor:pointer;text-decoration:underline}
+.pop .mini.danger{color:var(--miss)}
+
+.list{padding:18px 22px 40px;padding-bottom:max(40px,env(safe-area-inset-bottom))}
+.tablewrap{overflow:auto;max-height:78vh;background:var(--paper);border:1px solid var(--line);border-radius:8px}
+table{border-collapse:separate;border-spacing:0;width:100%;min-width:1500px;font-size:15px}
+th,td{padding:10px 12px;border-bottom:1px solid var(--line-2);text-align:left;vertical-align:top}
+thead th{position:sticky;top:0;z-index:3;background:#F5F6F5;font:700 13px/1.3 var(--cjk);color:var(--ink-2);white-space:nowrap;border-bottom-color:var(--line)}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--ink)}
+th[aria-sort=ascending]::after{content:" ▲";font-size:10px}
+th[aria-sort=descending]::after{content:" ▼";font-size:10px}
+td.k-type,td.k-text{white-space:nowrap}
+td.k-address{min-width:10em}
+td.k-history{min-width:230px}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tbody tr{background:var(--paper);cursor:pointer}
+tbody tr:hover{background:#F7F9FC}
+tbody tr.sel{background:var(--lane-tint)}
+.c-no{position:sticky;left:0;z-index:2;background:inherit;width:62px}
+.c-title{position:sticky;left:62px;z-index:2;background:inherit;min-width:230px;max-width:300px;box-shadow:1px 0 0 var(--line-2)}
+thead .c-no,thead .c-title{z-index:4;background:#F5F6F5}
+.c-title a{color:var(--ink);font-weight:700;text-decoration:none;font-family:var(--cjk)}
+.c-title a:hover{text-decoration:underline;color:var(--plate)}
+.site{display:inline-block;margin-left:6px;font-size:12px;color:var(--ink-3)}
+.site a{color:var(--ink-2)}
+.flag{display:block;margin-top:4px;font-size:12px;line-height:1.4;color:var(--ink-2)}
+.flag.bad{color:var(--miss)} .flag.dup{color:var(--plate-deep)}
+.flag.gone{color:var(--gone);font-weight:700}
+.plate{display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:26px;padding:0 7px;border:0;border-radius:4px;
+  background:var(--plate);color:#fff;font:800 14px/1 var(--font);font-variant-numeric:tabular-nums;cursor:pointer;
+  box-shadow:inset 0 0 0 2px var(--plate),inset 0 0 0 3px rgba(255,255,255,.92)}
+.plate.gone{background:var(--gone);box-shadow:inset 0 0 0 2px var(--gone),inset 0 0 0 3px rgba(255,255,255,.92)}
+.miss{color:var(--miss);font-weight:700}
+.tag{display:inline-block;margin-left:4px;padding:0 4px;border:1px solid var(--line);border-radius:3px;font:500 11px/1.5 var(--cjk);color:var(--ink-2);vertical-align:1px;cursor:help}
+.sub{display:block;font-size:12px;color:var(--ink-3)}
+.hist{list-style:none;margin:0;padding:0;font-size:13px;line-height:1.5;min-width:200px}
+.hist .hk{display:block;font-size:11px;color:var(--ink-3)}
+.hist .hd{color:var(--ink-2);font-variant-numeric:tabular-nums}
+.hist .hx{color:var(--miss);font-size:12px}
+.hist .ht{color:var(--ink-3)}
+.plog{margin-top:4px;font-size:12px;color:var(--ink-2)}
+.note{width:100%;min-width:170px;min-height:54px;font:14px/1.4 var(--font);color:var(--ink);border:1px solid var(--line-2);
+  background:#FAFBFA;border-radius:4px;padding:6px 8px;resize:vertical}
+.note:focus{background:#fff;border-color:var(--plate);outline:2px solid var(--lane)}
+.notetext{white-space:pre-wrap;font-size:14px;min-width:150px}
+.acts{white-space:nowrap}
+.acts button{display:block;appearance:none;border:0;background:none;color:var(--plate);font:700 13px/1.9 var(--cjk);padding:0;cursor:pointer}
+.acts button.danger{color:var(--miss)}
+#empty{background:var(--paper);border:1px dashed var(--line);border-radius:8px;padding:28px;text-align:center;color:var(--ink-2);margin:0}
+.legend{margin:12px 2px 0;font-size:13px;color:var(--ink-2);display:flex;gap:6px 18px;flex-wrap:wrap}
+
+.cards{display:none;background:var(--paper);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.card{padding:14px 14px 16px;border-top:1px solid var(--line)}
+.card:first-child{border-top:0}
+.card.sel{background:var(--lane-tint)}
+.card h3{display:flex;gap:10px;align-items:flex-start;margin:0 0 6px;font:700 16px/1.4 var(--cjk)}
+.card h3 a{color:var(--ink);text-decoration:none}
+.card .price{font:800 22px/1.2 var(--font);color:var(--plate)}
+.card .price small{font:500 14px var(--font);color:var(--ink-2);margin-left:6px}
+.card dl{display:grid;grid-template-columns:4.5em 1fr;gap:4px 10px;margin:10px 0 0;font-size:15px}
+.card dt{color:var(--ink-2)} .card dd{margin:0}
+.card .note{margin-top:10px}
+.card .acts{display:flex;gap:18px;margin-top:8px}
+
+body.dropping::after{content:"放開滑鼠就會讀取這個網頁存檔";position:fixed;inset:12px;z-index:2000;border:3px dashed var(--plate);
+  border-radius:12px;background:rgba(234,240,250,.92);display:flex;align-items:center;justify-content:center;font:700 20px var(--cjk);color:var(--plate)}
+
+@media (max-width:760px){
+  .bar{padding:12px 14px 10px}
+  .brand h1{font-size:18px}
+  .add{grid-template-columns:1fr}
+  #paste{grid-column:auto}
+  .btn.primary{width:100%;justify-content:center}
+  #map{height:56vh}
+  .list{padding:14px 10px 32px}
+  .tablewrap{display:none}
+  .cards{display:block}
+}
+@media (prefers-reduced-motion:reduce){#paste{transition:none}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <h1 id="pageTitle">地圖</h1>
+    <p id="summary"></p>
+  </div>
+  <div class="viewbar" id="viewBar" hidden>
+    <a class="btn primary" id="formLink" target="_blank" rel="noopener" hidden>新增物件或備註</a>
+    <p class="viewnote">點門牌看詳細資料，右上角可以切換航照圖。表單送出後大約 5 到 15 分鐘會出現在這裡。</p>
+  </div>
+</header>
+
+<main>
+  <section id="mapWrap" aria-label="地圖">
+    <div id="map"></div>
+    <div id="mapHint" hidden>拖曳藍色門牌或綠色地標到正確位置；點地圖空白處可以新增地標（例如：我家）</div>
+  </section>
+  <section class="list" aria-label="物件比較">
+    <p id="empty" hidden></p>
+    <div class="tablewrap" id="tablewrap"><table id="table"><caption class="sr">物件比較表</caption></table></div>
+    <div class="cards" id="cards"></div>
+    <p class="legend">
+      <span><span class="miss">✗</span> 網頁上沒寫或沒抓到</span>
+      <span><span class="tag">算</span> 由總價 ÷ 坪數算出</span>
+      <span><span class="tag">描述</span> 從物件說明文字找到，請再確認</span>
+      <span>門牌上有「約」：位置依路名推估</span>
+    </p>
+  </section>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+(() => {
+"use strict";
+const EXPORT = (() => {
+  try { return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(window.__DATA__ || ""), c => c.charCodeAt(0)))); }
+  catch (e) { return null; }
+})();
+const EDIT = !EXPORT;
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const nf = new Intl.NumberFormat("zh-TW", {maximumFractionDigits: 2});
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+let S = EXPORT || {houses: [], landmarks: [], columns: [], region: {center: [24.827, 121.013], zoom: 14}};
+let map, houseLayer, lmLayer;
+const hMarkers = new Map();
+let lmMarkers = [];
+let adjusting = false, selected = null, sort = {key: "no", dir: 1}, busy = false;
+
+const SRC_TAG = {
+  calc: ["算", "由總價 ÷ 坪數算出"],
+  desc: ["描述", "從物件說明文字找到的，請再確認"],
+  main: ["主建物", "網頁只寫了主建物坪數"],
+};
+const MISS = '<span class="miss" title="網頁上沒寫或沒抓到">✗</span>';
+
+function fmt(kind, v) {
+  if (v === null || v === undefined || v === "") return null;
+  switch (kind) {
+    case "wan": return `${nf.format(v)} 萬`;
+    case "unit": return `${nf.format(Math.round(v * 100) / 100)} 萬/坪`;
+    case "ping": return `${nf.format(v)} 坪`;
+    case "years": return typeof v === "number" ? `${nf.format(v)} 年` : String(v);
+    case "floors": return v && v.n ? `${v.n} 樓${v.b ? "＋地下室" : ""}` : (v && v.raw) || null;
+    case "address": return String(v).replace(/^新竹縣(?=竹北市)/, "");
+    default: return typeof v === "object" ? null : String(v);
+  }
+}
+function sortVal(kind, v) {
+  if (v == null) return null;
+  if (kind === "floors") return v.n ?? null;
+  return typeof v === "number" ? v : null;
+}
+function tagHTML(h, key) {
+  const t = SRC_TAG[h.src[key]];
+  if (!t) return "";
+  let tip = t[1];
+  if (key === "unit_price" && h.fields.unit_price_site) tip += `；網頁上寫 ${nf.format(h.fields.unit_price_site)} 萬/坪，可能是用降價前的價格算的`;
+  return ` <span class="tag" title="${esc(tip)}">${t[0]}</span>`;
+}
+const titleOf = h => h.fields.title || `${h.site || ""}物件（沒有名稱）`;
+const safeUrl = u => /^https?:\/\//i.test(u || "") ? u : "";
+function linkTitle(h) {
+  const u = safeUrl(h.url);
+  return u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(titleOf(h))}</a>` : `<span>${esc(titleOf(h))}</span>`;
+}
+function fmtTime(t, withTime = true) {
+  if (!t) return "";
+  const d = new Date(t);
+  if (isNaN(d)) return t;
+  const p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())}` + (withTime ? ` ${p(d.getHours())}:${p(d.getMinutes())}` : "");
+}
+function km(a, b) {
+  const R = 6371, r = x => x * Math.PI / 180;
+  const dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+const distText = d => d < 1 ? `${Math.max(10, Math.round(d * 100) * 10)} 公尺` : `${nf.format(Math.round(d * 10) / 10)} 公里`;
+
+function roadKey(a) {
+  if (!a) return null;
+  let s = String(a).replace(/^(?:台灣|臺灣)?(?:\S{2}[縣])?/, "").replace(/^\S{2}[市鄉鎮區]/, "");
+  s = s.replace(/\d+(?:之\d+)?號.*$/, "").replace(/\d+[巷弄].*$/, "").trim();
+  return s || null;
+}
+function computeDupes() {
+  const out = new Map();
+  const hs = S.houses;
+  for (let i = 0; i < hs.length; i++) for (let j = i + 1; j < hs.length; j++) {
+    const a = hs[i].fields, b = hs[j].fields;
+    const ra = roadKey(a.address), rb = roadKey(b.address);
+    if (!ra || ra !== rb || !a.building_ping || !b.building_ping) continue;
+    if (Math.abs(a.building_ping - b.building_ping) / a.building_ping > 0.015) continue;
+    const fa = a.floors && a.floors.n, fb = b.floors && b.floors.n;
+    if (fa && fb && fa !== fb) continue;
+    [[hs[i], hs[j]], [hs[j], hs[i]]].forEach(([x, y]) => { if (!out.has(x.id)) out.set(x.id, []); out.get(x.id).push(y.no); });
+  }
+  return out;
+}
+let DUPES = new Map();
+
+function typeHTML(h) {
+  const f = h.fields;
+  if (!f.type) return MISS;
+  return esc(f.type) + tagHTML(h, "type") + (f.usage ? `<span class="sub">${esc(f.usage)}</span>` : "");
+}
+function histHTML(h, limit = 3) {
+  const items = h.fields.history || [];
+  let s = "";
+  if (items.length) {
+    const groups = [["成交", "實價登錄"], ["開價", "開價歷程"]];
+    s += '<ul class="hist">';
+    groups.forEach(([kind, label]) => {
+      const g = items.filter(r => (r.kind || "成交") === kind);
+      if (!g.length) return;
+      s += `<li class="hk">${label}</li>`;
+      g.slice(0, limit).forEach(r => {
+        s += `<li><span class="hd">${esc(r.date)}</span> <b>${r.price != null ? esc(nf.format(r.price)) + "萬" : ""}</b>` +
+             (r.change ? ` <span class="hx">${esc(r.change)}</span>` : "") +
+             (r.area ? ` <span class="ht">${esc(nf.format(r.area))}坪</span>` : "") +
+             (r.text ? ` <span class="ht">${esc(r.text)}</span>` : "") +
+             (r.note ? ` <span class="ht">${esc(r.note)}</span>` : "") + "</li>";
+      });
+      if (g.length > limit) s += `<li class="ht">還有 ${g.length - limit} 筆（點門牌看全部）</li>`;
+    });
+    s += "</ul>";
+  } else s += MISS;
+  const log = h.price_log || [];
+  if (log.length >= 2) s += `<div class="plog" title="這個工具每次抓到的開價">本工具記錄的開價：${log.map(x => `${esc((x.t || "").slice(5).replace("-", "/"))} ${esc(nf.format(x.price))}萬`).join(" → ")}</div>`;
+  return s;
+}
+function siteHTML(h) {
+  if (!h.site) return "";
+  const more = (h.links || []).filter(l => safeUrl(l.url)).map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.site)}</a>`);
+  return `<span class="site">${esc(h.site)}${more.length ? "、" + more.join("、") : ""}</span>`;
+}
+function flagsHTML(h) {
+  let s = "";
+  if (h.gone) s += '<span class="flag gone">網頁已不存在，可能下架或成交</span>';
+  const d = DUPES.get(h.id);
+  if (d) s += `<span class="flag dup">可能和 ${d.map(n => n + "號").join("、")} 是同一間</span>`;
+  if (!EDIT && h.geo.src === "none") s += '<span class="flag">地圖上找不到位置，可以用表單補座標</span>';
+  if (h.message) s += `<span class="flag ${h.status === "ok" ? "" : "bad"}">${esc(h.message)}</span>`;
+  return s;
+}
+function cell(h, col) {
+  if (col.kind === "title") return linkTitle(h) + siteHTML(h) + flagsHTML(h);
+  if (col.kind === "wan" && h.site_prices && Object.keys(h.site_prices).length > 1) {
+    const t = fmt("wan", h.fields[col.key]);
+    return (t ? esc(t) : MISS) + `<span class="sub">${Object.entries(h.site_prices).map(([k, v]) => `${esc(k)} ${esc(nf.format(v))}萬`).join("<br>")}</span>`;
+  }
+  if (col.kind === "type") return typeHTML(h);
+  if (col.kind === "history") return histHTML(h);
+  const v = h.fields[col.key];
+  const t = fmt(col.kind, v);
+  if (t == null) return MISS;
+  const body = col.kind === "floors" && v.raw ? `<span title="網頁寫的是：${esc(v.raw)}">${esc(t)}</span>` : esc(t);
+  return body + tagHTML(h, col.key);
+}
+const NUM_KINDS = new Set(["wan", "unit", "ping", "floors", "years"]);
+const plateBtn = h => `<button type="button" class="plate${h.gone ? " gone" : ""}" data-go="${esc(h.id)}" aria-label="${h.no}號，在地圖上看">${h.no}</button>`;
+function noteHTML(h) {
+  if (EDIT) return `<textarea class="note" data-note="${esc(h.id)}" rows="2" placeholder="備註">${esc(h.note)}</textarea>`;
+  return h.note ? `<div class="notetext">${esc(h.note)}</div>` : "";
+}
+function actsHTML(h) {
+  return `<button type="button" data-act="rename" data-id="${esc(h.id)}">改名</button>` +
+    (h.method === "paste" || !safeUrl(h.url) ? "" : `<button type="button" data-act="refetch" data-id="${esc(h.id)}">重抓</button>`) +
+    `<button type="button" data-act="debug" data-id="${esc(h.id)}">診斷</button>` +
+    `<button type="button" data-act="delete" data-id="${esc(h.id)}" class="danger">刪除</button>`;
+}
+
+function sortedHouses() {
+  const col = S.columns.find(c => c.key === sort.key);
+  return [...S.houses].sort((a, b) => {
+    let va, vb;
+    if (!col) { va = a.no; vb = b.no; }
+    else { va = sortVal(col.kind, a.fields[col.key]); vb = sortVal(col.kind, b.fields[col.key]); }
+    if (va == null && vb == null) return a.no - b.no;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    return (va - vb) * sort.dir || a.no - b.no;
+  });
+}
+function renderTable() {
+  const has = S.houses.length > 0;
+  $("#tablewrap").hidden = !has;
+  $("#cards").hidden = !has;
+  $("#empty").hidden = has;
+  $("#empty").textContent = "目前還沒有資料。";
+  if (!has) return;
+  const ariaSort = k => sort.key === k ? ` aria-sort="${sort.dir > 0 ? "ascending" : "descending"}"` : "";
+  let th = `<th scope="col" class="c-no sortable" data-sort="no"${ariaSort("no")}>編號</th>`;
+  S.columns.forEach(c => {
+    const cls = [c.kind === "title" ? "c-title" : "", NUM_KINDS.has(c.kind) ? "num" : "", c.sort ? "sortable" : ""].filter(Boolean).join(" ");
+    th += `<th scope="col" class="${cls}"${c.sort ? ` data-sort="${esc(c.key)}"` : ""}${ariaSort(c.key)}>${esc(c.label)}</th>`;
+  });
+  th += '<th scope="col">備註</th>' + (EDIT ? '<th scope="col"><span class="sr">操作</span></th>' : "");
+  const rows = sortedHouses().map(h => {
+    let tds = `<td class="c-no">${plateBtn(h)}</td>`;
+    S.columns.forEach(c => {
+      const cls = [c.kind === "title" ? "c-title" : "", NUM_KINDS.has(c.kind) ? "num" : "", "k-" + c.kind].filter(Boolean).join(" ");
+      tds += `<td${cls ? ` class="${cls}"` : ""}>${cell(h, c)}</td>`;
+    });
+    tds += `<td>${noteHTML(h)}</td>` + (EDIT ? `<td class="acts">${actsHTML(h)}</td>` : "");
+    return `<tr data-id="${esc(h.id)}"${h.id === selected ? ' class="sel"' : ""}>${tds}</tr>`;
+  }).join("");
+  $("#table").innerHTML = `<caption class="sr">物件比較表</caption><thead><tr>${th}</tr></thead><tbody>${rows}</tbody>`;
+}
+function renderCards() {
+  const order = ["type", "land_ping", "building_ping", "floors", "layout", "age", "direction", "parking", "address"];
+  $("#cards").innerHTML = sortedHouses().map(h => {
+    const f = h.fields;
+    const unit = fmt("unit", f.unit_price);
+    const dl = order.map(k => {
+      const col = S.columns.find(c => c.key === k);
+      if (!col) return "";
+      return `<dt>${esc(col.label)}</dt><dd>${cell(h, col)}</dd>`;
+    }).join("") + `<dt>歷史</dt><dd>${histHTML(h, 2)}</dd>`;
+    return `<article class="card${h.id === selected ? " sel" : ""}" data-id="${esc(h.id)}">
+      <h3>${plateBtn(h)}<span>${linkTitle(h)}${flagsHTML(h)}</span></h3>
+      <div class="price">${f.price != null ? esc(fmt("wan", f.price)) : MISS}${unit ? `<small>${esc(unit)}${tagHTML(h, "unit_price")}</small>` : ""}</div>
+      <dl>${dl}</dl>${noteHTML(h)}${EDIT ? `<div class="acts">${actsHTML(h)}</div>` : ""}</article>`;
+  }).join("");
+}
+function renderSummary() {
+  const n = S.houses.length;
+  const last = S.houses.map(h => h.fetched_at).filter(Boolean).sort().pop();
+  let s = n ? `共 ${n} 間` : "還沒有物件";
+  if (EXPORT) s += `，最後更新 ${fmtTime(S.exported_at)}`;
+  else if (last) s += `，最後更新 ${fmtTime(last)}`;
+  $("#summary").textContent = s;
+}
+
+function initMap() {
+  map = L.map("map", {zoomSnap: 0.5});
+  map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
+  const nlsc = (layer, set) => L.tileLayer(`https://wmts.nlsc.gov.tw/wmts/${layer}/default/${set}/{z}/{y}/{x}`, {
+    maxZoom: 19, maxNativeZoom: 18,
+    attribution: '底圖 © <a href="https://maps.nlsc.gov.tw/" target="_blank" rel="noopener">內政部國土測繪中心</a>'});
+  const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 19,
+    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'});
+  const bases = {
+    "臺灣通用電子地圖": nlsc("EMAP", "GoogleMapsCompatible"),
+    "灰階地圖": nlsc("EMAP01", "EPSG:3857"),
+    "航空照片": nlsc("PHOTO2", "EPSG:3857"),
+    "OpenStreetMap": osm,
+  };
+  const def = bases["臺灣通用電子地圖"].addTo(map);
+  let errs = 0, ok = 0;
+  def.on("tileload", () => ok++);
+  def.on("tileerror", () => {
+    if (++errs >= 6 && ok === 0 && map.hasLayer(def)) {
+      map.removeLayer(def); osm.addTo(map);
+      say("國土測繪中心的地圖暫時打不開，先換成 OpenStreetMap");
+    }
+  });
+  houseLayer = L.layerGroup().addTo(map);
+  lmLayer = L.layerGroup().addTo(map);
+  L.control.layers(bases, {"房屋": houseLayer, "地標": lmLayer}, {collapsed: true}).addTo(map);
+  L.control.scale({imperial: false}).addTo(map);
+  if (EDIT) addAdjustControl();
+  map.on("click", onMapClick);
+  map.on("popupopen", e => bindPopupButtons(e.popup.getElement()));
+}
+function houseIcon(h) {
+  const g = h.geo;
+  const cls = ["hpin", h.gone ? "gone" : "", g.src === "none" ? "unknown" : "", selected === h.id ? "sel" : ""].filter(Boolean).join(" ");
+  const badge = g.src === "geocode" ? '<span class="badge" title="依路名推估的位置">約</span>'
+              : g.src === "none" ? '<span class="badge" title="找不到位置，請拖曳到正確地點">?</span>' : "";
+  return L.divIcon({className: "hicon", html: `<div class="${cls}"><span class="pl">${h.no}</span>${badge}</div>`,
+    iconSize: [34, 36], iconAnchor: [17, 35], popupAnchor: [0, -32], tooltipAnchor: [17, -22]});
+}
+function unknownSpot(i) {
+  const [la, lo] = S.region.center;
+  return [la + 0.008 - i * 0.003, lo - 0.02];
+}
+function renderMarkers() {
+  houseLayer.clearLayers();
+  hMarkers.clear();
+  let unk = 0;
+  S.houses.forEach(h => {
+    let ll;
+    if (h.geo.lat != null) ll = [h.geo.lat, h.geo.lng];
+    else if (EDIT) ll = unknownSpot(unk++);
+    else return;
+    const m = L.marker(ll, {icon: houseIcon(h), keyboard: true, title: `${h.no}號 ${titleOf(h)}`, riseOnHover: true,
+                            zIndexOffset: selected === h.id ? 1000 : 0});
+    if (h.fields.price != null) m.bindTooltip(`${nf.format(h.fields.price)}萬`, {permanent: true, direction: "right", className: "ptip"});
+    m.bindPopup(() => popupHTML(h), {maxWidth: 330, minWidth: 260, autoPanPadding: [30, 40]});
+    m.on("click", () => select(h.id, {fly: false}));
+    m.on("dragend", e => onHouseDrag(h, e.target.getLatLng()));
+    m.addTo(houseLayer);
+    if (adjusting) m.dragging.enable();
+    hMarkers.set(h.id, m);
+  });
+}
+function popupHTML(h) {
+  const f = h.fields;
+  const facts = [
+    ["總坪數", fmt("ping", f.building_ping), "building_ping"],
+    ["土地", fmt("ping", f.land_ping), "land_ping"],
+    ["樓層", fmt("floors", f.floors), "floors"],
+    ["格局", fmt("text", f.layout), "layout"],
+    ["屋齡", fmt("years", f.age), "age"],
+    ["座向", fmt("text", f.direction), "direction"],
+    ["車位", fmt("text", f.parking), "parking"],
+    ["類型", [f.type, f.usage].filter(Boolean).join("，") || null, "type"],
+    ["地點", fmt("address", f.address), "address"],
+  ];
+  if (f.road_width) facts.push(["臨路", f.road_width, "road_width"]);
+  if (f.frontage) facts.push(["面寬", f.frontage, "frontage"]);
+  const dl = facts.map(([k, v, key]) => `<dt>${k}</dt><dd>${v == null ? MISS : esc(v) + tagHTML(h, key)}</dd>`).join("");
+  const unit = fmt("unit", f.unit_price);
+  let near = "";
+  if (h.geo.lat != null && S.landmarks.length) {
+    near = S.landmarks.map(l => [l, km(h.geo, l)]).sort((a, b) => a[1] - b[1]).slice(0, 3)
+      .map(([l, d]) => `${esc(l.name)} ${distText(d)}`).join("、");
+    near = `<div class="sec">直線距離：${near}</div>`;
+  }
+  const hist = (f.history && f.history.length) || (h.price_log || []).length >= 2 ? `<div class="sec">${histHTML(h, 20)}</div>` : "";
+  const geoNote = {page: "位置取自物件網頁", geocode: "位置依路名推估，可能差幾百公尺", manual: "位置是手動調整過的",
+                   none: EDIT ? "找不到位置：按地圖左上的「調整位置」，把門牌拖到正確地點" : "找不到位置"}[h.geo.src] || "";
+  let links = "";
+  if (h.geo.lat != null) {
+    const ll = `${h.geo.lat},${h.geo.lng}`;
+    links = `<div class="links"><a href="https://www.google.com/maps/search/?api=1&query=${ll}" target="_blank" rel="noopener">Google 地圖</a>` +
+            `<a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${ll}" target="_blank" rel="noopener">看街景</a>` +
+            (safeUrl(h.url) ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">物件網頁</a>` : "") + "</div>";
+  }
+  const reset = EDIT && h.geo.src === "manual" && h.has_page_geo ? ` <button type="button" class="mini" data-reset-geo="${esc(h.id)}">改回網頁上的位置</button>` : "";
+  return `<div class="pop"><h3>${plateBtn(h).replace("data-go", "data-none")}<span>${linkTitle(h)}</span></h3>
+    <div><span class="pp">${f.price != null ? esc(fmt("wan", f.price)) : MISS}</span>${unit ? `<span class="pu">${esc(unit)}${tagHTML(h, "unit_price")}</span>` : ""}</div>
+    <dl>${dl}</dl>${hist}${near}${h.note ? `<div class="sec">備註：${esc(h.note)}</div>` : ""}${links}
+    <div class="geo">${geoNote}${reset}${h.debug_url ? `　<a href="${esc(h.debug_url)}" target="_blank" rel="noopener">診斷資料</a>` : ""}</div></div>`;
+}
+function renderLandmarks() {
+  lmLayer.clearLayers();
+  lmMarkers = [];
+  S.landmarks.forEach((l, i) => {
+    const m = L.marker([l.lat, l.lng], {
+      icon: L.divIcon({className: "licon", html: '<div class="lmdot"></div>', iconSize: [12, 12], iconAnchor: [6, 6], tooltipAnchor: [0, -8], popupAnchor: [0, -10]}),
+      keyboard: false, zIndexOffset: -500, title: l.name});
+    m.bindTooltip(esc(l.name), {permanent: true, direction: "top", className: "ltip", opacity: 1});
+    if (EDIT) {
+      m.bindPopup(() => `<div class="pop"><h3><span>${esc(l.name)}</span></h3>
+        <button type="button" class="mini" data-lm-rename="${i}">改名</button>　<button type="button" class="mini danger" data-lm-del="${i}">刪除這個地標</button></div>`);
+      m.on("dragend", e => {
+        const p = e.target.getLatLng();
+        S.landmarks[i] = {...S.landmarks[i], lat: +p.lat.toFixed(6), lng: +p.lng.toFixed(6)};
+        saveLandmarks();
+      });
+    }
+    m.addTo(lmLayer);
+    if (adjusting) m.dragging.enable();
+    lmMarkers.push(m);
+  });
+}
+function bindPopupButtons(el) {
+  if (!el) return;
+  el.querySelectorAll("[data-lm-del]").forEach(b => b.addEventListener("click", () => {
+    const i = +b.dataset.lmDel;
+    if (!confirm(`刪除地標「${S.landmarks[i].name}」？`)) return;
+    S.landmarks.splice(i, 1); map.closePopup(); renderLandmarks(); saveLandmarks();
+  }));
+  el.querySelectorAll("[data-lm-rename]").forEach(b => b.addEventListener("click", () => {
+    const i = +b.dataset.lmRename;
+    const name = (prompt("地標的新名稱：", S.landmarks[i].name) || "").trim();
+    if (!name) return;
+    S.landmarks[i].name = name.slice(0, 30); map.closePopup(); renderLandmarks(); saveLandmarks();
+  }));
+  el.querySelectorAll("[data-reset-geo]").forEach(b => b.addEventListener("click", async () => {
+    const r = await api("/api/update", {id: b.dataset.resetGeo, reset_geo: true});
+    if (r.ok) { upsert(r.house); map.closePopup(); renderMarkers(); say("已改回網頁上的位置", "ok"); } else say(r.error, "err");
+  }));
+}
+function addAdjustControl() {
+  const Ctl = L.Control.extend({options: {position: "topleft"}, onAdd() {
+    const b = L.DomUtil.create("button", "adj-btn");
+    b.type = "button"; b.textContent = "調整位置"; b.setAttribute("aria-pressed", "false");
+    L.DomEvent.disableClickPropagation(b);
+    L.DomEvent.on(b, "click", () => setAdjust(!adjusting));
+    return b;
+  }});
+  map.addControl(new Ctl());
+}
+function setAdjust(on) {
+  adjusting = on;
+  document.body.classList.toggle("adjusting", on);
+  const b = $(".adj-btn");
+  b.textContent = on ? "完成調整" : "調整位置";
+  b.setAttribute("aria-pressed", String(on));
+  [...hMarkers.values(), ...lmMarkers].forEach(m => on ? m.dragging.enable() : m.dragging.disable());
+  $("#mapHint").hidden = !on;
+}
+function onMapClick(e) {
+  if (!adjusting) return;
+  const name = (prompt("在這裡新增地標，名稱是？（例如：我家、公司、爸媽家）") || "").trim();
+  if (!name) return;
+  S.landmarks.push({name: name.slice(0, 30), lat: +e.latlng.lat.toFixed(6), lng: +e.latlng.lng.toFixed(6)});
+  renderLandmarks(); saveLandmarks();
+}
+async function onHouseDrag(h, ll) {
+  const r = await api("/api/update", {id: h.id, lat: ll.lat, lng: ll.lng});
+  if (!r.ok) { say(r.error, "err"); renderMarkers(); return; }
+  upsert(r.house); renderMarkers(); say(`${h.no}號的位置已更新`, "ok");
+}
+let lmTimer;
+function saveLandmarks() {
+  clearTimeout(lmTimer);
+  lmTimer = setTimeout(async () => {
+    const r = await api("/api/landmarks", {landmarks: S.landmarks});
+    if (r.ok) say("地標已儲存", "ok"); else say(r.error, "err");
+  }, 300);
+}
+function fitAll() {
+  const pts = S.houses.filter(h => h.geo.lat != null).map(h => [h.geo.lat, h.geo.lng]);
+  if (EDIT) S.houses.filter(h => h.geo.lat == null).forEach((h, i) => pts.push(unknownSpot(i)));
+  if (pts.length >= 2) map.fitBounds(pts, {padding: [60, 60], maxZoom: 16});
+  else if (pts.length === 1) map.setView(pts[0], 15);
+  else map.setView(S.region.center, S.region.zoom || 14);
+}
+
+const byId = id => S.houses.find(h => h.id === id);
+function select(id, {fly = true} = {}) {
+  const prev = selected;
+  selected = id;
+  [prev, id].forEach(x => {
+    const m = hMarkers.get(x), h = byId(x);
+    if (m && h) { m.setIcon(houseIcon(h)); m.setZIndexOffset(x === id ? 1000 : 0); }
+  });
+  $$("[data-id].sel").forEach(el => el.classList.remove("sel"));
+  $$(`tr[data-id="${CSS.escape(id)}"], article[data-id="${CSS.escape(id)}"]`).forEach(el => el.classList.add("sel"));
+  const m = hMarkers.get(id);
+  if (m && fly) {
+    const z = Math.max(map.getZoom(), 16);
+    if (window.innerWidth <= 760 || $("#mapWrap").getBoundingClientRect().bottom < 80) {
+      $("#mapWrap").scrollIntoView({behavior: REDUCED ? "auto" : "smooth", block: "start"});
+    }
+    if (REDUCED) { map.setView(m.getLatLng(), z); m.openPopup(); }
+    else { map.flyTo(m.getLatLng(), z, {duration: 0.6}); map.once("moveend", () => m.openPopup()); }
+  }
+}
+
+async function api(path, body) {
+  try {
+    const res = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-House-Map": "1"}, body: JSON.stringify(body)});
+    const data = await res.json().catch(() => ({ok: false, error: `程式回應異常（HTTP ${res.status}）`}));
+    if (path === "/api/state") return {ok: res.ok, state: data};
+    return data;
+  } catch (e) {
+    return {ok: false, error: "連線失敗"};
+  }
+}
+function upsert(h) {
+  const i = S.houses.findIndex(x => x.id === h.id);
+  if (i >= 0) S.houses[i] = h; else S.houses.push(h);
+}
+let sayTimer;
+function say(msg, kind = "") {
+  const el = $("#status");
+  if (!el || !EDIT) return;
+  el.textContent = msg || "";
+  el.className = kind;
+  clearTimeout(sayTimer);
+  if (kind === "ok") sayTimer = setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 8000);
+}
+function setBusy(b) {
+  busy = b;
+  $$("[data-edit] button, #fileInput").forEach(x => x.disabled = b);
+}
+function renderAll() {
+  DUPES = computeDupes();
+  renderSummary(); renderTable(); renderCards(); renderMarkers();
+}
+
+async function onAdd(e) {
+  e.preventDefault();
+  if (busy) return;
+  const urlText = $("#urls").value.trim();
+  const text = $("#paste").value.trim();
+  const urls = urlText.split(/\s+/).filter(Boolean);
+  if (text) {
+    if (urls.length > 1) { say("有貼內容時一次只能加入一間，網址請只留一個", "err"); return; }
+    setBusy(true); say("讀取貼上的內容…");
+    const r = await api("/api/add", {url: urls[0] || "", text});
+    setBusy(false);
+    if (!r.ok) { say(r.error, "err"); return; }
+    upsert(r.house); renderAll(); select(r.house.id);
+    $("#urls").value = ""; $("#paste").value = ""; $("#paste").classList.remove("filled"); autoGrow();
+    say(`${r.new ? "已加入" : "已更新"} ${r.house.no}號（來自貼上的內容）` + (r.house.geo.src === "none" ? "。沒有地址，請按「調整位置」把門牌拖到正確地點" : ""), "ok");
+    return;
+  }
+  if (!urls.length) { say("請貼上物件網址，或在下面貼上物件頁的內容", "err"); return; }
+  setBusy(true);
+  let ok = 0, last = null;
+  const errs = [];
+  for (let i = 0; i < urls.length; i++) {
+    say(`抓取中 ${i + 1}/${urls.length}：${urls[i].slice(0, 60)}`);
+    const r = await api("/api/add", {url: urls[i]});
+    if (r.ok) { ok++; upsert(r.house); last = r.house; renderAll(); }
+    else errs.push(`${urls[i].slice(0, 50)}：${r.error}`);
+  }
+  setBusy(false);
+  if (last) select(last.id);
+  if (!errs.length) { $("#urls").value = ""; autoGrow(); }
+  else $("#urls").value = urls.filter((u, i) => errs.some(x => x.startsWith(u.slice(0, 50)))).join("\n");
+  say(errs.length ? `加入 ${ok} 間；${errs.length} 間失敗 — ${errs.join("；")}` : `已加入 ${ok} 間`, errs.length ? "err" : "ok");
+}
+async function onReparse() {
+  setBusy(true); say("重新解析中…");
+  const r = await api("/api/reparse", {});
+  setBusy(false);
+  if (!r.ok) { say(r.error, "err"); return; }
+  S = r.state; renderAll(); renderLandmarks();
+  say(`已重新解析 ${r.count} 間`, "ok");
+}
+async function onRefetchAll() {
+  const list = S.houses.filter(h => h.method !== "paste" && safeUrl(h.url));
+  if (!list.length) { say("沒有可以重抓的物件（貼上內容加入的不會重抓）"); return; }
+  if (!confirm(`要重新連網站抓 ${list.length} 間嗎？每間之間會停幾秒。`)) return;
+  setBusy(true);
+  const errs = [];
+  for (let i = 0; i < list.length; i++) {
+    say(`重抓中 ${i + 1}/${list.length}：${list[i].no}號`);
+    const r = await api("/api/refetch", {id: list[i].id});
+    if (r.ok) { upsert(r.house); renderAll(); } else errs.push(`${list[i].no}號：${r.error}`);
+  }
+  setBusy(false);
+  say(errs.length ? `重抓完成，${errs.length} 間有問題 — ${errs.join("；")}` : `已重抓 ${list.length} 間`, errs.length ? "err" : "ok");
+}
+async function onAct(e) {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  e.stopPropagation();
+  const h = byId(b.dataset.id);
+  if (!h) return;
+  const act = b.dataset.act;
+  if (act === "debug") { window.open("/debug/" + encodeURIComponent(h.id), "_blank"); return; }
+  if (act === "rename") {
+    const t = prompt(`${h.no}號的名稱（留空就改回網頁上的名稱）：`, h.src.title === "manual" ? h.fields.title : (h.fields.title || ""));
+    if (t === null) return;
+    const r = await api("/api/update", {id: h.id, title: t});
+    if (r.ok) { upsert(r.house); renderAll(); say("名稱已更新", "ok"); } else say(r.error, "err");
+    return;
+  }
+  if (act === "delete") {
+    if (!confirm(`確定要刪除 ${h.no}號「${titleOf(h)}」？（存下來的網頁會移到 data/trash 資料夾）`)) return;
+    const r = await api("/api/delete", {id: h.id});
+    if (r.ok) { S.houses = S.houses.filter(x => x.id !== h.id); renderAll(); say(`已刪除 ${h.no}號`, "ok"); } else say(r.error, "err");
+    return;
+  }
+  if (act === "refetch") {
+    setBusy(true); say(`重抓 ${h.no}號…`);
+    const r = await api("/api/refetch", {id: h.id});
+    setBusy(false);
+    if (r.ok) { upsert(r.house); renderAll(); say(`${h.no}號已更新`, "ok"); } else say(r.error, "err");
+  }
+}
+async function onNote(e) {
+  const t = e.target.closest("textarea[data-note]");
+  if (!t) return;
+  const r = await api("/api/update", {id: t.dataset.note, note: t.value});
+  if (r.ok) { upsert(r.house); $$(`textarea[data-note="${CSS.escape(t.dataset.note)}"]`).forEach(x => { if (x !== t) x.value = t.value; }); say("備註已儲存", "ok"); }
+  else say(r.error, "err");
+}
+async function uploadFiles(files) {
+  for (const file of files) {
+    if (!/\.html?$/i.test(file.name) && file.type !== "text/html") { say(`${file.name} 不是網頁存檔（.html）`, "err"); continue; }
+    const html = await file.text();
+    say(`讀取存檔 ${file.name}…`);
+    let r = await api("/api/upload", {html, url: $("#urls").value.trim().split(/\s+/)[0] || null});
+    if (!r.ok && r.need_url) {
+      const url = (prompt(`「${file.name}」裡找不到原本的網址，請貼上這間的網址：`) || "").trim();
+      if (!url) continue;
+      r = await api("/api/upload", {html, url});
+    }
+    if (r.ok) { upsert(r.house); renderAll(); select(r.house.id); say(`${r.new ? "已加入" : "已更新"} ${r.house.no}號（來自存檔）`, "ok"); }
+    else say(r.error, "err");
+  }
+}
+function autoGrow() {
+  const t = $("#urls");
+  t.style.height = "44px";
+  t.style.height = Math.min(160, Math.max(44, t.scrollHeight + 2)) + "px";
+}
+
+function bindCommon() {
+  document.addEventListener("click", e => {
+    const go = e.target.closest("[data-go]");
+    if (go) { e.stopPropagation(); select(go.dataset.go); return; }
+    const th = e.target.closest("th[data-sort]");
+    if (th) {
+      const k = th.dataset.sort;
+      sort = sort.key === k ? {key: k, dir: -sort.dir} : {key: k, dir: 1};
+      renderTable(); renderCards(); return;
+    }
+    const row = e.target.closest("tr[data-id]");
+    if (row && !e.target.closest("a,button,textarea,input")) select(row.dataset.id);
+  });
+}
+async function start() {
+  if (EXPORT && EXPORT.title) { document.title = EXPORT.title; $("#pageTitle").textContent = EXPORT.title; }
+  if (!EDIT) {
+    $$("[data-edit]").forEach(el => el.hidden = true);
+    $("#viewBar").hidden = false;
+    if (safeUrl(S.form_url)) { $("#formLink").href = S.form_url; $("#formLink").hidden = false; }
+  }
+  if (!window.L) {
+    document.getElementById("map").innerHTML = '<p style="padding:20px">地圖元件載入失敗，請確認網路連線後重新整理。</p>';
+  }
+  if (EDIT) { $("#empty").hidden = false; $("#empty").textContent = "資料讀取失敗"; return; }
+  bindCommon();
+  if (window.L) { initMap(); renderLandmarks(); }
+  DUPES = computeDupes();
+  renderSummary(); renderTable(); renderCards();
+  if (window.L) { renderMarkers(); fitAll(); }
+}
+start();
+})();
+</script>
+</body>
+</html>
