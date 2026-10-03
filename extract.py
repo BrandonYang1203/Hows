@@ -788,7 +788,7 @@ def parse(html_text, xhr=None, url='', region=None, debug=False):
         for i, ln in enumerate(lines[:20]):
             if re.search('\\d+\\s*萬|坪|^\\d', ln) or any((ln.startswith(a) for a in ALL_LABELS)):
                 break
-            if 5 <= len(ln) <= 60 and re.search('[\\u4e00-\\u9fff]', ln) and (not _in(i, skip)):
+            if 5 <= len(ln) <= 60 and re.search('[\\u4e00-\\u9fff]', ln) and (not _ADDR_LINE.match(ln)) and (not _in(i, skip)):
                 put('title', ln, 'text')
                 break
     desc_text = '\n'.join((l for i, l in enumerate(lines) if _in(i, desc_ranges)))

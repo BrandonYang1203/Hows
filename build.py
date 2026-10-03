@@ -35,6 +35,7 @@ UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML,
 SHEET_CSV_URL = os.environ.get('SHEET_CSV_URL', '').strip()
 FORM_URL = os.environ.get('FORM_URL', '').strip()
 REPO = os.environ.get('GITHUB_REPOSITORY', '').strip()
+FORM_PREFILL_URL = os.environ.get('FORM_PREFILL_URL', '').strip()
 PAGE_TITLE = os.environ.get('PAGE_TITLE', '').strip() or '家庭地圖'
 
 def now():
@@ -374,9 +375,16 @@ def process_row(db, r):
         if u:
             urls.append(u)
     text = r['text']
-    if not urls and len(text) < 20:
-        m = re.search('(\\d+)\\s*號', r['note'] + ' ' + r['title'])
-        h = next((x for x in db['houses'] if m and x['no'] == int(m.group(1))), None)
+    note = r['note'].strip()
+    if not urls and re.match('^地標', note):
+        handle_landmark(r)
+        return
+    ref = re.match('^\\s*(\\d+)\\s*號\\s*', note) or re.match('^\\s*(\\d+)\\s*號', r['title'])
+    if ref and re.match('^\\s*\\d+\\s*號', note):
+        note = note[ref.end():].strip()
+    target = next((x for x in db['houses'] if ref and x['no'] == int(ref.group(1))), None) if not urls else None
+    if not urls and (target or len(text) < 20):
+        h = target
         if not h:
             log(f'  row {r['row']} skipped')
             return
@@ -419,8 +427,8 @@ def process_row(db, r):
         if u in (h.get('pasted') or []):
             continue
         fetch_into(h, u)
-    if r['note']:
-        h.setdefault('notes', []).append({'who': r['who'], 't': r['time'], 'text': r['note'][:1000]})
+    if note:
+        h.setdefault('notes', []).append({'who': r['who'], 't': r['time'], 'text': note[:1000]})
     c = parse_coord(r['geo'])
     if c:
         h.setdefault('user', {})['lat'], h['user']['lng'] = c
@@ -429,6 +437,40 @@ def process_row(db, r):
     rebuild(h)
     f = h.get('data') or {}
     log(f'  #{h['no']} price={('ok' if f.get('price') else 'missing')} geo={('manual' if (h.get('user') or {}).get('lat') else (h.get('geo') or {}).get('src', 'none'))}')
+
+LANDMARKS_CHANGED = [False]
+
+def save_landmarks(items):
+    with open(LANDMARKS, 'w', encoding='utf-8-sig', newline='') as f:
+        w = csv.writer(f)
+        w.writerow(['名稱', '緯度', '經度'])
+        for it in items:
+            w.writerow([it['name'], round(it['lat'], 6), round(it['lng'], 6)])
+    LANDMARKS_CHANGED[0] = True
+
+def handle_landmark(r):
+    name = re.sub('^地標[\\s：:]*', '', r['note'].strip()).strip()[:30]
+    if not name:
+        log(f'  row {r['row']} landmark without name')
+        return
+    items = load_landmarks()
+    if re.search('移除|刪除', r['act']):
+        items = [x for x in items if x['name'] != name]
+        save_landmarks(items)
+        log(f'  row {r['row']} landmark removed')
+        return
+    c = parse_coord(r['geo'])
+    if not c:
+        log(f'  row {r['row']} landmark without coord')
+        return
+    for x in items:
+        if x['name'] == name:
+            x['lat'], x['lng'] = c
+            break
+    else:
+        items.append({'name': name, 'lat': c[0], 'lng': c[1]})
+    save_landmarks(items)
+    log(f'  row {r['row']} landmark saved')
 
 def sync():
     rows, sheet_hash = read_sheet()
@@ -523,7 +565,7 @@ def build_page():
             write_debug(h)
         except Exception as e:
             log(f'#{h['no']} debug error')
-    state = {'houses': [public(h) for h in sorted(db['houses'], key=lambda x: x['no'])], 'landmarks': load_landmarks(), 'columns': extract.COLUMNS, 'region': {'center': list(REGION_CENTER), 'zoom': REGION_ZOOM}, 'exported_at': now().isoformat(), 'form_url': FORM_URL, 'title': PAGE_TITLE}
+    state = {'houses': [public(h) for h in sorted(db['houses'], key=lambda x: x['no'])], 'landmarks': load_landmarks(), 'columns': extract.COLUMNS, 'region': {'center': list(REGION_CENTER), 'zoom': REGION_ZOOM}, 'exported_at': now().isoformat(), 'form_url': FORM_URL, 'prefill_url': FORM_PREFILL_URL, 'title': PAGE_TITLE}
     with open(TEMPLATE, encoding='utf-8') as f:
         tpl = f.read()
     payload = base64.b64encode(json.dumps(state, ensure_ascii=False).encode('utf-8')).decode('ascii')

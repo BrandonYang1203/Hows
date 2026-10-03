@@ -52,6 +52,12 @@ a{color:var(--plate)}
 .viewbar{display:flex;gap:10px 16px;align-items:center;flex-wrap:wrap}
 .viewnote{margin:0;font-size:14px;color:var(--ink-2);flex:1;min-width:220px}
 a.btn{text-decoration:none}
+#btnEdit[aria-pressed=true]{background:var(--lane);border-color:var(--lane)}
+.editlinks{display:none;gap:12px;margin-top:6px;flex-wrap:wrap}
+body.editing .editlinks{display:flex}
+.editlinks button{appearance:none;border:0;background:none;padding:0;font:700 13px/1.6 var(--cjk);color:var(--plate);cursor:pointer;text-decoration:underline}
+.editlinks button.danger{color:var(--miss)}
+body.picking #map{cursor:crosshair}
 
 #mapWrap{position:relative;border-bottom:1px solid var(--line)}
 #map{height:clamp(380px,60vh,760px);background:#DCE1DE}
@@ -184,6 +190,8 @@ body.dropping::after{content:"放開滑鼠就會讀取這個網頁存檔";positi
   </div>
   <div class="viewbar" id="viewBar" hidden>
     <a class="btn primary" id="formLink" target="_blank" rel="noopener" hidden>新增物件或備註</a>
+    <button class="btn" type="button" id="btnEdit" aria-pressed="false">編輯</button>
+    <button class="btn" type="button" id="btnCsv">下載表格</button>
     <p class="viewnote">點門牌看詳細資料，右上角可以切換航照圖。表單送出後大約 5 到 15 分鐘會出現在這裡。</p>
   </div>
 </header>
@@ -332,6 +340,94 @@ function histHTML(h, limit = 3) {
   if (log.length >= 2) s += `<div class="plog" title="這個工具每次抓到的開價">本工具記錄的開價：${log.map(x => `${esc((x.t || "").slice(5).replace("-", "/"))} ${esc(nf.format(x.price))}萬`).join(" → ")}</div>`;
   return s;
 }
+let editing = false, picking = null;
+function prefill({url = "", note = "", geo = "", remove = false}) {
+  if (!safeUrl(S.prefill_url)) return null;
+  const u = new URL(S.prefill_url);
+  const out = new URL(u.origin + u.pathname);
+  for (const [k, v] of u.searchParams) {
+    if (v === "XURLX") { if (url) out.searchParams.set(k, url); }
+    else if (v === "XNOTEX") { if (note) out.searchParams.set(k, note); }
+    else if (v === "XGEOX") { if (geo) out.searchParams.set(k, geo); }
+    else if (k.startsWith("entry.")) { if (remove) out.searchParams.append(k, v); }
+    else out.searchParams.append(k, v);
+  }
+  return out.toString();
+}
+function openForm(opts) {
+  const link = prefill(opts);
+  if (!link) { alert("還沒設定 FORM_PREFILL_URL，無法從網頁編輯。"); return; }
+  window.open(link, "_blank", "noopener");
+}
+const refOf = h => ({url: safeUrl(h.url) ? h.url : "", note: `${h.no}號 `});
+function editLinks(h) {
+  if (EDIT) return "";
+  return `<span class="editlinks"><button type="button" data-ed="add" data-id="${esc(h.id)}">補充資料</button>` +
+    `<button type="button" data-ed="move" data-id="${esc(h.id)}">修正位置</button>` +
+    `<button type="button" data-ed="del" data-id="${esc(h.id)}" class="danger">刪除</button></span>`;
+}
+function setEditing(on) {
+  editing = on; picking = null;
+  document.body.classList.toggle("editing", on);
+  document.body.classList.remove("picking");
+  $("#btnEdit").setAttribute("aria-pressed", String(on));
+  $("#btnEdit").textContent = on ? "完成編輯" : "編輯";
+  $("#mapHint").textContent = "點地圖空白處新增地標；點綠色地標可以移動或刪除";
+  $("#mapHint").hidden = !on;
+}
+function onEditClick(e) {
+  const b = e.target.closest("[data-ed]");
+  if (!b) return;
+  e.stopPropagation();
+  const h = byId(b.dataset.id);
+  if (!h) return;
+  const ref = refOf(h);
+  if (b.dataset.ed === "add") openForm(ref);
+  if (b.dataset.ed === "del" && confirm(`要把 ${h.no}號 從地圖移除嗎？\n會打開表單，按「提交」才會生效。`)) openForm({...ref, remove: true});
+  if (b.dataset.ed === "move") {
+    picking = {type: "house", h};
+    document.body.classList.add("picking");
+    $("#mapHint").textContent = `點地圖上 ${h.no}號 的正確位置`;
+    $("#mapHint").hidden = false;
+    $("#mapWrap").scrollIntoView({behavior: REDUCED ? "auto" : "smooth", block: "start"});
+  }
+}
+function onViewMapClick(e) {
+  if (!editing) return;
+  const geo = `${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
+  if (picking && picking.type === "house") {
+    const h = picking.h;
+    if (confirm(`把 ${h.no}號 移到這裡？\n會打開表單，按「提交」才會生效。`)) openForm({...refOf(h), geo});
+  } else if (picking && picking.type === "lm") {
+    if (confirm(`把「${picking.name}」移到這裡？\n會打開表單，按「提交」才會生效。`)) openForm({note: `地標 ${picking.name}`, geo});
+  } else {
+    const name = (prompt("在這裡新增地標，名稱是？（例如：我家、公司）") || "").trim();
+    if (name) openForm({note: `地標 ${name}`, geo});
+  }
+  picking = null;
+  document.body.classList.remove("picking");
+  setEditing(true);
+}
+function downloadCsv() {
+  const cols = S.columns;
+  const head = ["編號", ...cols.map(c => c.label), "網址", "備註"];
+  const val = (h, c) => {
+    const v = h.fields[c.key];
+    if (c.kind === "history") return (v || []).map(r => `${r.date} ${r.price ?? ""}萬${r.change ? " " + r.change : ""}${r.text ? " " + r.text : ""}`).join("；");
+    if (c.kind === "type") return [v, h.fields.usage].filter(Boolean).join(" ");
+    if (c.kind === "floors") return v && v.n ? v.n : "";
+    if (v == null) return "";
+    return typeof v === "object" ? "" : v;
+  };
+  const rows = sortedHouses().map(h => [h.no, ...cols.map(c => val(h, c)), h.url || "", h.note || ""]);
+  const q = x => { const t = String(x ?? ""); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const csv = "\ufeff" + [head, ...rows].map(r => r.map(q).join(",")).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv;charset=utf-8"}));
+  a.download = `${(S.title || "表格")}_${fmtTime(S.exported_at, false).replace(/\//g, "")}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
 function siteHTML(h) {
   if (!h.site) return "";
   const more = (h.links || []).filter(l => safeUrl(l.url)).map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.site)}</a>`);
@@ -347,7 +443,7 @@ function flagsHTML(h) {
   return s;
 }
 function cell(h, col) {
-  if (col.kind === "title") return linkTitle(h) + siteHTML(h) + flagsHTML(h);
+  if (col.kind === "title") return linkTitle(h) + siteHTML(h) + flagsHTML(h) + editLinks(h);
   if (col.kind === "wan" && h.site_prices && Object.keys(h.site_prices).length > 1) {
     const t = fmt("wan", h.fields[col.key]);
     return (t ? esc(t) : MISS) + `<span class="sub">${Object.entries(h.site_prices).map(([k, v]) => `${esc(k)} ${esc(nf.format(v))}萬`).join("<br>")}</span>`;
@@ -421,7 +517,7 @@ function renderCards() {
       return `<dt>${esc(col.label)}</dt><dd>${cell(h, col)}</dd>`;
     }).join("") + `<dt>歷史</dt><dd>${histHTML(h, 2)}</dd>`;
     return `<article class="card${h.id === selected ? " sel" : ""}" data-id="${esc(h.id)}">
-      <h3>${plateBtn(h)}<span>${linkTitle(h)}${flagsHTML(h)}</span></h3>
+      <h3>${plateBtn(h)}<span>${linkTitle(h)}${flagsHTML(h)}${editLinks(h)}</span></h3>
       <div class="price">${f.price != null ? esc(fmt("wan", f.price)) : MISS}${unit ? `<small>${esc(unit)}${tagHTML(h, "unit_price")}</small>` : ""}</div>
       <dl>${dl}</dl>${noteHTML(h)}${EDIT ? `<div class="acts">${actsHTML(h)}</div>` : ""}</article>`;
   }).join("");
@@ -535,7 +631,7 @@ function popupHTML(h) {
   return `<div class="pop"><h3>${plateBtn(h).replace("data-go", "data-none")}<span>${linkTitle(h)}</span></h3>
     <div><span class="pp">${f.price != null ? esc(fmt("wan", f.price)) : MISS}</span>${unit ? `<span class="pu">${esc(unit)}${tagHTML(h, "unit_price")}</span>` : ""}</div>
     <dl>${dl}</dl>${hist}${near}${h.note ? `<div class="sec">備註：${esc(h.note)}</div>` : ""}${links}
-    <div class="geo">${geoNote}${reset}${h.debug_url ? `　<a href="${esc(h.debug_url)}" target="_blank" rel="noopener">診斷資料</a>` : ""}</div></div>`;
+    ${editLinks(h)}<div class="geo">${geoNote}${reset}${h.debug_url ? `　<a href="${esc(h.debug_url)}" target="_blank" rel="noopener">診斷資料</a>` : ""}</div></div>`;
 }
 function renderLandmarks() {
   lmLayer.clearLayers();
@@ -545,6 +641,11 @@ function renderLandmarks() {
       icon: L.divIcon({className: "licon", html: '<div class="lmdot"></div>', iconSize: [12, 12], iconAnchor: [6, 6], tooltipAnchor: [0, -8], popupAnchor: [0, -10]}),
       keyboard: false, zIndexOffset: -500, title: l.name});
     m.bindTooltip(esc(l.name), {permanent: true, direction: "top", className: "ltip", opacity: 1});
+    if (!EDIT) {
+      m.bindPopup(() => editing ? `<div class="pop"><h3><span>${esc(l.name)}</span></h3><div class="editlinks" style="display:flex">
+        <button type="button" data-vlm-move="${i}">移動到別處</button><button type="button" class="danger" data-vlm-del="${i}">刪除這個地標</button></div></div>`
+        : `<div class="pop"><h3><span>${esc(l.name)}</span></h3></div>`);
+    }
     if (EDIT) {
       m.bindPopup(() => `<div class="pop"><h3><span>${esc(l.name)}</span></h3>
         <button type="button" class="mini" data-lm-rename="${i}">改名</button>　<button type="button" class="mini danger" data-lm-del="${i}">刪除這個地標</button></div>`);
@@ -561,6 +662,20 @@ function renderLandmarks() {
 }
 function bindPopupButtons(el) {
   if (!el) return;
+  el.querySelectorAll("[data-vlm-move]").forEach(b => b.addEventListener("click", () => {
+    const l = S.landmarks[+b.dataset.vlmMove];
+    map.closePopup();
+    picking = {type: "lm", name: l.name};
+    document.body.classList.add("picking");
+    $("#mapHint").textContent = `點地圖上「${l.name}」的正確位置`;
+    $("#mapHint").hidden = false;
+  }));
+  el.querySelectorAll("[data-vlm-del]").forEach(b => b.addEventListener("click", () => {
+    const l = S.landmarks[+b.dataset.vlmDel];
+    map.closePopup();
+    if (confirm(`刪除地標「${l.name}」？\n會打開表單，按「提交」才會生效。`)) openForm({note: `地標 ${l.name}`, remove: true});
+  }));
+
   el.querySelectorAll("[data-lm-del]").forEach(b => b.addEventListener("click", () => {
     const i = +b.dataset.lmDel;
     if (!confirm(`刪除地標「${S.landmarks[i].name}」？`)) return;
@@ -597,6 +712,7 @@ function setAdjust(on) {
   $("#mapHint").hidden = !on;
 }
 function onMapClick(e) {
+  if (!EDIT) { onViewMapClick(e); return; }
   if (!adjusting) return;
   const name = (prompt("在這裡新增地標，名稱是？（例如：我家、公司、爸媽家）") || "").trim();
   if (!name) return;
@@ -808,6 +924,9 @@ async function start() {
     $$("[data-edit]").forEach(el => el.hidden = true);
     $("#viewBar").hidden = false;
     if (safeUrl(S.form_url)) { $("#formLink").href = S.form_url; $("#formLink").hidden = false; }
+    $("#btnEdit").addEventListener("click", () => setEditing(!editing));
+    $("#btnCsv").addEventListener("click", downloadCsv);
+    document.addEventListener("click", onEditClick);
   }
   if (!window.L) {
     document.getElementById("map").innerHTML = '<p style="padding:20px">地圖元件載入失敗，請確認網路連線後重新整理。</p>';
